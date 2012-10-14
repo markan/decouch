@@ -11,7 +11,6 @@
 % the License.
 
 -module(couch_file).
--behaviour(gen_server).
 
 -include("couch_db.hrl").
 
@@ -24,12 +23,13 @@
     path = ""
     }).
 
--export([open/1, open/2, close/1, bytes/1, sync/1, append_binary/2,old_pread/3]).
--export([append_term/2, pread_term/2, pread_iolist/2, write_header/2]).
--export([pread_binary/2, read_header/1, truncate/2, upgrade_old_header/2]).
+-export([open/1, open/2, close/1, bytes/1, sync/1, append_binary/2]).
+-export([append_term/2, pread_term/2, pread_iolist/2]).
+-export([pread_binary/2, read_header/1, truncate/2]).
 -export([append_term_md5/2,append_binary_md5/2]).
--export([init/1, terminate/2, handle_call/3, handle_cast/2, code_change/3, handle_info/2]).
 -export([delete/2,delete/3,init_delete_dir/1]).
+
+-export([open_ns/2, pread_iolist_ns/2, pread_ns/3, bytes_ns/1, sync_ns/1, find_header_ns/1]).
 
 %%----------------------------------------------------------------------
 %% Args:   Valid Options are [create] and [create,overwrite].
@@ -213,17 +213,6 @@ init_delete_dir(RootDir) ->
             ok = file:delete(Filename)
         end, ok).
 
-
-% 09 UPGRADE CODE
-old_pread(Fd, Pos, Len) ->
-    {ok, <<RawBin:Len/binary>>, false} = gen_server:call(Fd, {pread, Pos, Len}, infinity),
-    {ok, RawBin}.
-
-% 09 UPGRADE CODE
-upgrade_old_header(Fd, Sig) ->
-    gen_server:call(Fd, {upgrade_old_header, Sig}, infinity).
-
-
 read_header(Fd) ->
     case gen_server:call(Fd, find_header, infinity) of
     {ok, Bin} ->
@@ -232,265 +221,7 @@ read_header(Fd) ->
         Else
     end.
 
-write_header(Fd, Data) ->
-    Bin = term_to_binary(Data),
-    Md5 = couch_util:md5(Bin),
-    % now we assemble the final header binary and write to disk
-    FinalBin = <<Md5/binary, Bin/binary>>,
-    gen_server:call(Fd, {write_header, FinalBin}, infinity).
-
-
-
-
-init_status_error(ReturnPid, Ref, Error) ->
-    ReturnPid ! {Ref, self(), Error},
-    ignore.
-
-% server functions
-
-init({Filepath, Options, ReturnPid, Ref}) ->
-    process_flag(trap_exit, true),
-    case lists:member(create, Options) of
-    true ->
-        filelib:ensure_dir(Filepath),
-        case file:open(Filepath, [read, append, raw, binary]) of
-        {ok, Fd} ->
-            {ok, Length} = file:position(Fd, eof),
-            case Length > 0 of
-            true ->
-                % this means the file already exists and has data.
-                % FYI: We don't differentiate between empty files and non-existant
-                % files here.
-                case lists:member(overwrite, Options) of
-                true ->
-                    {ok, 0} = file:position(Fd, 0),
-                    ok = file:truncate(Fd),
-                    ok = file:sync(Fd),
-                    maybe_track_open_os_files(Options),
-                    {ok, #file{fd=Fd}, path=Filepath};
-                false ->
-                    ok = file:close(Fd),
-                    init_status_error(ReturnPid, Ref, file_exists)
-                end;
-            false ->
-                maybe_track_open_os_files(Options),
-                {ok, #file{fd=Fd,path=Filepath}}
-            end;
-        Error ->
-            init_status_error(ReturnPid, Ref, Error)
-        end;
-    false ->
-        % open in read mode first, so we don't create the file if it doesn't exist.
-        case file:open(Filepath, [read, raw]) of
-        {ok, Fd_Read} ->
-            {ok, Fd} = file:open(Filepath, [read, append, raw, binary]),
-            ok = file:close(Fd_Read),
-            maybe_track_open_os_files(Options),
-            {ok, Length} = file:position(Fd, eof),
-            {ok, #file{fd=Fd, eof=Length, path=Filepath}};
-        Error ->
-            init_status_error(ReturnPid, Ref, Error)
-        end
-    end.
-
-maybe_track_open_os_files(FileOptions) ->
-    case lists:member(sys_db, FileOptions) of
-    true ->
-        ok;
-    false ->
-        couch_stats_collector:track_process_count({couchdb, open_os_files})
-    end.
-
-terminate(_Reason, _Fd) ->
-    ok.
-
-
-handle_call({pread_iolist, Pos}, _From, File) ->
-    {LenIolist, NextPos} = read_raw_iolist_int(File, Pos, 4),
-    case iolist_to_binary(LenIolist) of
-    <<1:1/integer,Len:31/integer>> -> % an MD5-prefixed term
-        {Md5AndIoList, _} = read_raw_iolist_int(File, NextPos, Len+16),
-        {Md5, IoList} = extract_md5(Md5AndIoList),
-        {reply, {ok, IoList, Md5}, File};
-    <<0:1/integer,Len:31/integer>> ->
-        {Iolist, _} = read_raw_iolist_int(File, NextPos, Len),
-        {reply, {ok, Iolist, <<>>}, File}
-    end;
-handle_call({pread, Pos, Bytes}, _From, #file{fd=Fd,tail_append_begin=TailAppendBegin}=File) ->
-    {ok, Bin} = file:pread(Fd, Pos, Bytes),
-    {reply, {ok, Bin, Pos >= TailAppendBegin}, File};
-handle_call(bytes, _From, #file{eof=Length}=File) ->
-    {reply, {ok, Length}, File};
-handle_call(sync, _From, #file{fd=Fd}=File) ->
-    {reply, file:sync(Fd), File};
-handle_call({truncate, Pos}, _From, #file{fd=Fd}=File) ->
-    {ok, Pos} = file:position(Fd, Pos),
-    case file:truncate(Fd) of
-    ok ->
-        {reply, ok, File#file{eof=Pos}};
-    Error ->
-        {reply, Error, File}
-    end;
-handle_call({append_bin, Bin}, _From, #file{fd=Fd, eof=Pos}=File) ->
-    Blocks = make_blocks(Pos rem ?SIZE_BLOCK, Bin),
-    case file:write(Fd, Blocks) of
-    ok ->
-        {reply, {ok, Pos}, File#file{eof=Pos+iolist_size(Blocks)}};
-    Error ->
-        {reply, Error, File}
-    end;
-handle_call({write_header, Bin}, _From, #file{fd=Fd, eof=Pos}=File) ->
-    BinSize = size(Bin),
-    case Pos rem ?SIZE_BLOCK of
-    0 ->
-        Padding = <<>>;
-    BlockOffset ->
-        Padding = <<0:(8*(?SIZE_BLOCK-BlockOffset))>>
-    end,
-    FinalBin = [Padding, <<1, BinSize:32/integer>> | make_blocks(5, [Bin])],
-    case file:write(Fd, FinalBin) of
-    ok ->
-        {reply, ok, File#file{eof=Pos+iolist_size(FinalBin)}};
-    Error ->
-        {reply, Error, File}
-    end;
-
-
-handle_call({upgrade_old_header, Prefix}, _From, #file{fd=Fd}=File) ->
-    case (catch read_old_header(Fd, Prefix)) of
-    {ok, Header} ->
-        TailAppendBegin = File#file.eof,
-        Bin = term_to_binary(Header),
-        Md5 = couch_util:md5(Bin),
-        % now we assemble the final header binary and write to disk
-        FinalBin = <<Md5/binary, Bin/binary>>,
-        {reply, ok, _} = handle_call({write_header, FinalBin}, ok, File),
-        ok = write_old_header(Fd, <<"upgraded">>, TailAppendBegin),
-        {reply, ok, File#file{tail_append_begin=TailAppendBegin}};
-    _Error ->
-        case (catch read_old_header(Fd, <<"upgraded">>)) of
-        {ok, TailAppendBegin} ->
-            {reply, ok, File#file{tail_append_begin = TailAppendBegin}};
-        _Error2 ->
-            {reply, ok, File}
-        end
-    end;
-
-
-handle_call(find_header, _From, #file{fd=Fd, eof=Pos}=File) ->
-    {reply, find_header(Fd, Pos div ?SIZE_BLOCK), File}.
-
-% 09 UPGRADE CODE
 -define(HEADER_SIZE, 2048). % size of each segment of the doubly written header
-
-% 09 UPGRADE CODE
-read_old_header(Fd, Prefix) ->
-    {ok, Bin} = file:pread(Fd, 0, 2*(?HEADER_SIZE)),
-    <<Bin1:(?HEADER_SIZE)/binary, Bin2:(?HEADER_SIZE)/binary>> = Bin,
-    Result =
-    % read the first header
-    case extract_header(Prefix, Bin1) of
-    {ok, Header1} ->
-        case extract_header(Prefix, Bin2) of
-        {ok, Header2} ->
-            case Header1 == Header2 of
-            true ->
-                % Everything is completely normal!
-                {ok, Header1};
-            false ->
-                % To get here we must have two different header versions with signatures intact.
-                % It's weird but possible (a commit failure right at the 2k boundary). Log it and take the first.
-                ?LOG_INFO("Header version differences.~nPrimary Header: ~p~nSecondary Header: ~p", [Header1, Header2]),
-                {ok, Header1}
-            end;
-        Error ->
-            % error reading second header. It's ok, but log it.
-            ?LOG_INFO("Secondary header corruption (error: ~p). Using primary header.", [Error]),
-            {ok, Header1}
-        end;
-    Error ->
-        % error reading primary header
-        case extract_header(Prefix, Bin2) of
-        {ok, Header2} ->
-            % log corrupt primary header. It's ok since the secondary is still good.
-            ?LOG_INFO("Primary header corruption (error: ~p). Using secondary header.", [Error]),
-            {ok, Header2};
-        _ ->
-            % error reading secondary header too
-            % return the error, no need to log anything as the caller will be responsible for dealing with the error.
-            Error
-        end
-    end,
-    case Result of
-    {ok, {pointer_to_header_data, Ptr}} ->
-        pread_term(Fd, Ptr);
-    _ ->
-        Result
-    end.
-
-% 09 UPGRADE CODE
-extract_header(Prefix, Bin) ->
-    SizeOfPrefix = size(Prefix),
-    SizeOfTermBin = ?HEADER_SIZE -
-                    SizeOfPrefix -
-                    16,     % md5 sig
-
-    <<HeaderPrefix:SizeOfPrefix/binary, TermBin:SizeOfTermBin/binary, Sig:16/binary>> = Bin,
-
-    % check the header prefix
-    case HeaderPrefix of
-    Prefix ->
-        % check the integrity signature
-        case couch_util:md5(TermBin) == Sig of
-        true ->
-            Header = binary_to_term(TermBin),
-            {ok, Header};
-        false ->
-            header_corrupt
-        end;
-    _ ->
-        unknown_header_type
-    end.
-
-
-% 09 UPGRADE CODE
-write_old_header(Fd, Prefix, Data) ->
-    TermBin = term_to_binary(Data),
-    % the size of all the bytes written to the header, including the md5 signature (16 bytes)
-    FilledSize = byte_size(Prefix) + byte_size(TermBin) + 16,
-    {TermBin2, FilledSize2} =
-    case FilledSize > ?HEADER_SIZE of
-    true ->
-        % too big!
-        {ok, Pos} = append_binary(Fd, TermBin),
-        PtrBin = term_to_binary({pointer_to_header_data, Pos}),
-        {PtrBin, byte_size(Prefix) + byte_size(PtrBin) + 16};
-    false ->
-        {TermBin, FilledSize}
-    end,
-    ok = file:sync(Fd),
-    % pad out the header with zeros, then take the md5 hash
-    PadZeros = <<0:(8*(?HEADER_SIZE - FilledSize2))>>,
-    Sig = couch_util:md5([TermBin2, PadZeros]),
-    % now we assemble the final header binary and write to disk
-    WriteBin = <<Prefix/binary, TermBin2/binary, PadZeros/binary, Sig/binary>>,
-    ?HEADER_SIZE = size(WriteBin), % sanity check
-    DblWriteBin = [WriteBin, WriteBin],
-    ok = file:pwrite(Fd, 0, DblWriteBin),
-    ok = file:sync(Fd).
-
-
-handle_cast(close, Fd) ->
-    {stop,normal,Fd}.
-
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-handle_info({'EXIT', _, normal}, Fd) ->
-    {noreply, Fd};
-handle_info({'EXIT', _, Reason}, Fd) ->
-    {stop, Reason, Fd}.
 
 
 find_header(_Fd, -1) ->
@@ -571,18 +302,6 @@ remove_block_prefixes(BlockOffset, Bin) ->
         [Bin]
     end.
 
-make_blocks(_BlockOffset, []) ->
-    [];
-make_blocks(0, IoList) ->
-    [<<0>> | make_blocks(1, IoList)];
-make_blocks(BlockOffset, IoList) ->
-    case split_iolist(IoList, (?SIZE_BLOCK - BlockOffset), []) of
-    {Begin, End} ->
-        [Begin | make_blocks(0, End)];
-    _SplitRemaining ->
-        IoList
-    end.
-
 %% @doc Returns a tuple where the first element contains the leading SplitAt
 %% bytes of the original iolist, and the 2nd element is the tail. If SplitAt
 %% is larger than byte_size(IoList), return the difference.
@@ -606,3 +325,37 @@ split_iolist([Sublist| Rest], SplitAt, BeginAcc) when is_list(Sublist) ->
     end;
 split_iolist([Byte | Rest], SplitAt, BeginAcc) when is_integer(Byte) ->
     split_iolist(Rest, SplitAt - 1, [Byte | BeginAcc]).
+
+
+%%
+%% Factored out gen_server funs...
+%% 
+pread_iolist_ns(File, Pos) ->
+    {LenIolist, NextPos} = read_raw_iolist_int(File, Pos, 4),
+    case iolist_to_binary(LenIolist) of
+        <<1:1/integer,Len:31/integer>> -> % an MD5-prefixed term
+            {Md5AndIoList, _} = read_raw_iolist_int(File, NextPos, Len+16),
+            {Md5, IoList} = extract_md5(Md5AndIoList),
+            {ok, IoList, Md5};
+    <<0:1/integer,Len:31/integer>> ->
+            {Iolist, _} = read_raw_iolist_int(File, NextPos, Len),
+            {ok, Iolist, <<>>}
+    end.
+
+pread_ns(#file{fd=Fd,tail_append_begin=TailAppendBegin} = _File, Pos, Bytes) ->
+    {ok, Bin} = file:pread(Fd, Pos, Bytes),
+    {ok, Bin, Pos >= TailAppendBegin}.
+
+open_ns(FilePath, _Options) ->
+    {ok, Fd} = file:open(FilePath, [read, append, raw, binary]),
+    {ok, Length} = file:position(Fd, eof),
+    {ok, #file{fd=Fd, eof=Length, path=FilePath}}.
+
+bytes_ns(#file{eof=Length}) ->
+    Length.
+
+sync_ns(#file{fd=Fd}) ->
+    file:sync(Fd).
+
+find_header_ns(#file{fd=Fd, eof=Pos}) ->
+    find_header(Fd, Pos div ?SIZE_BLOCK).
