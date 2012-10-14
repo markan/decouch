@@ -1,0 +1,12 @@
+{application, decouch,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { decouch_app, []}},
+  {env, []}
+ ]}.
