@@ -41,8 +41,8 @@ merge(Paths, Path) ->
     end,
     {lists:sort(Merged), Conflicts}.
 
--spec merge_one(Original::[path()], Inserted::path(), [path()], bool()) ->
-    {ok, Merged::[path()], NewConflicts::bool()}.
+-spec merge_one(Original::[path()], Inserted::path(), [path()], boolean()) ->
+    {ok, Merged::[path()], NewConflicts::boolean()}.
 merge_one([], Insert, OutAcc, ConflictsAcc) ->
     {ok, [Insert | OutAcc], ConflictsAcc};
 merge_one([{Start, Tree}|Rest], {StartInsert, TreeInsert}, Acc, HasConflicts) ->
@@ -56,7 +56,7 @@ merge_one([{Start, Tree}|Rest], {StartInsert, TreeInsert}, Acc, HasConflicts) ->
     end.
 
 -spec merge_at(tree(), Place::integer(), tree()) ->
-    {ok, Merged::tree(), HasConflicts::bool()} | no.
+    {ok, Merged::tree(), HasConflicts::boolean()} | no.
 merge_at(_Ours, _Place, []) ->
     no;
 merge_at([], _Place, _Insert) ->
@@ -98,7 +98,7 @@ merge_at([Tree | Sibs], 0, InsertTree) ->
 
 % key tree functions
 
--spec merge_simple(tree(), tree()) -> {Merged::tree(), NewConflicts::bool()}.
+-spec merge_simple(tree(), tree()) -> {Merged::tree(), NewConflicts::boolean()}.
 merge_simple([], B) ->
     {B, false};
 merge_simple(A, []) ->
