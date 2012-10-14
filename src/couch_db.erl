@@ -749,13 +749,7 @@ set_commit_option(Options) ->
     case CommitSettings of
     {[true], _} ->
         Options; % user requested explicit commit setting, do not change it
-    {_, "true"} ->
-        Options; % delayed commits are enabled, do nothing
     {_, "false"} ->
-        [full_commit|Options];
-    {_, Else} ->
-        ?LOG_ERROR("[couchdb] delayed_commits setting must be true/false, not ~p",
-            [Else]),
         [full_commit|Options]
     end.
 
