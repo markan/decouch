@@ -743,7 +743,8 @@ make_first_doc_on_disk(Db, Id, Pos, [{_Rev, {IsDel, Sp, _Seq}} |_]=DocPath) ->
 set_commit_option(Options) ->
     CommitSettings = {
         [true || O <- Options, O==full_commit orelse O==delay_commit],
-        couch_config:get("couchdb", "delayed_commits", "false")
+%%        couch_config:get("couchdb", "delayed_commits", "false")
+      "false" %% hardcode to false to avoid dependency.
     },
     case CommitSettings of
     {[true], _} ->
