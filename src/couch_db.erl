@@ -29,6 +29,8 @@
 -export([check_is_admin/1, check_is_reader/1]).
 -export([reopen/1]).
 
+-export([open_db_file/2]).
+
 -include("couch_db.hrl").
 
 

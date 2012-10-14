@@ -16,6 +16,8 @@
 -export([btree_by_id_reduce/2,btree_by_seq_reduce/2]).
 -export([init/1,terminate/2,handle_call/3,handle_cast/2,code_change/3,handle_info/2]).
 
+-export([init_db/4]).
+
 -include("couch_db.hrl").
 -include_lib("kernel/include/file.hrl").
 
@@ -378,9 +380,11 @@ init_db(DbName, Filepath, Fd, Header0) ->
     _ -> throw({database_disk_version_error, "Incorrect disk header version"})
     end,
 
-    {ok, FsyncOptions} = couch_util:parse_term(
-            couch_config:get("couchdb", "fsync_options",
-                    "[before_header, after_header, on_file_open]")),
+    {ok, FsyncOptions} = {ok, [before_header, after_header, on_file_open]},
+% couch_util:parse_term(
+%            couch_config:get("couchdb", "fsync_options",
+%                    "[before_header, after_header, on_file_open]")),
+%                           "before_header").
 
     case lists:member(on_file_open, FsyncOptions) of
     true -> ok = couch_file:sync(Fd);
