@@ -23,12 +23,10 @@
     path = ""
     }).
 
--export([open/1, open/2, close/1, bytes/1, sync/1, append_binary/2]).
--export([append_term/2, pread_term/2, pread_iolist/2]).
--export([pread_binary/2, read_header/1, truncate/2]).
--export([append_term_md5/2,append_binary_md5/2]).
--export([delete/2,delete/3,init_delete_dir/1]).
-
+-export([open/1, open/2, close/1, bytes/1]).
+-export([pread_term/2, pread_iolist/2]).
+-export([pread_binary/2, read_header/1]).
+-export([close_ns/1]).
 -export([open_ns/2, pread_iolist_ns/2, pread_ns/3, bytes_ns/1, sync_ns/1, find_header_ns/1]).
 
 %%----------------------------------------------------------------------
@@ -42,57 +40,7 @@ open(Filepath) ->
     open(Filepath, []).
 
 open(Filepath, Options) ->
-    case gen_server:start_link(couch_file,
-            {Filepath, Options, self(), Ref = make_ref()}, []) of
-    {ok, Fd} ->
-        {ok, Fd};
-    ignore ->
-        % get the error
-        receive
-        {Ref, Pid, Error} ->
-            case process_info(self(), trap_exit) of
-            {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
-            {trap_exit, false} -> ok
-            end,
-            Error
-        end;
-    Error ->
-        Error
-    end.
-
-
-%%----------------------------------------------------------------------
-%% Purpose: To append an Erlang term to the end of the file.
-%% Args:    Erlang term to serialize and append to the file.
-%% Returns: {ok, Pos} where Pos is the file offset to the beginning the
-%%  serialized  term. Use pread_term to read the term back.
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
-append_term(Fd, Term) ->
-    append_binary(Fd, term_to_binary(Term)).
-    
-append_term_md5(Fd, Term) ->
-    append_binary_md5(Fd, term_to_binary(Term)).
-
-
-%%----------------------------------------------------------------------
-%% Purpose: To append an Erlang binary to the end of the file.
-%% Args:    Erlang term to serialize and append to the file.
-%% Returns: {ok, Pos} where Pos is the file offset to the beginning the
-%%  serialized  term. Use pread_term to read the term back.
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
-append_binary(Fd, Bin) ->
-    Size = iolist_size(Bin),
-    gen_server:call(Fd, {append_bin,
-            [<<0:1/integer,Size:31/integer>>, Bin]}, infinity).
-    
-append_binary_md5(Fd, Bin) ->
-    Size = iolist_size(Bin),
-    gen_server:call(Fd, {append_bin,
-            [<<1:1/integer,Size:31/integer>>, couch_util:md5(Bin), Bin]}, infinity).
+    open_ns(Filepath, Options).
 
 
 %%----------------------------------------------------------------------
@@ -121,7 +69,7 @@ pread_binary(Fd, Pos) ->
 
 
 pread_iolist(Fd, Pos) ->
-    case gen_server:call(Fd, {pread_iolist, Pos}, infinity) of
+    case pread_iolist_ns(Fd, Pos) of
     {ok, IoList, <<>>} ->
         {ok, IoList};
     {ok, IoList, Md5} ->
@@ -143,28 +91,8 @@ pread_iolist(Fd, Pos) ->
 
 % length in bytes
 bytes(Fd) ->
-    gen_server:call(Fd, bytes, infinity).
+    bytes_ns(Fd).
 
-%%----------------------------------------------------------------------
-%% Purpose: Truncate a file to the number of bytes.
-%% Returns: ok
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
-truncate(Fd, Pos) ->
-    gen_server:call(Fd, {truncate, Pos}, infinity).
-
-%%----------------------------------------------------------------------
-%% Purpose: Ensure all bytes written to the file are flushed to disk.
-%% Returns: ok
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
-sync(Filepath) when is_list(Filepath) ->
-    {ok, Fd} = file:open(Filepath, [append, raw]),
-    try file:sync(Fd) after file:close(Fd) end;
-sync(Fd) ->
-    gen_server:call(Fd, sync, infinity).
 
 %%----------------------------------------------------------------------
 %% Purpose: Close the file.
@@ -184,42 +112,9 @@ close(Fd) ->
     end.
 
 
-delete(RootDir, Filepath) ->
-    delete(RootDir, Filepath, true).
-
-
-delete(RootDir, Filepath, Async) ->
-    DelFile = filename:join([RootDir,".delete", ?b2l(couch_uuids:random())]),
-    case file:rename(Filepath, DelFile) of
-    ok ->
-        if (Async) ->
-            spawn(file, delete, [DelFile]),
-            ok;
-        true ->
-            file:delete(DelFile)
-        end;
-    Error ->
-        Error
-    end.
-
-
-init_delete_dir(RootDir) ->
-    Dir = filename:join(RootDir,".delete"),
-    % note: ensure_dir requires an actual filename companent, which is the
-    % reason for "foo".
-    filelib:ensure_dir(filename:join(Dir,"foo")),
-    filelib:fold_files(Dir, ".*", true,
-        fun(Filename, _) ->
-            ok = file:delete(Filename)
-        end, ok).
-
 read_header(Fd) ->
-    case gen_server:call(Fd, find_header, infinity) of
-    {ok, Bin} ->
-        {ok, binary_to_term(Bin)};
-    Else ->
-        Else
-    end.
+    {ok, Term} = find_header_ns(Fd),
+    {ok, binary_to_term(Term)}.
 
 -define(HEADER_SIZE, 2048). % size of each segment of the doubly written header
 
@@ -253,22 +148,22 @@ read_raw_iolist_int(#file{fd=Fd, tail_append_begin=TAB, path=Path}, Pos, Len) ->
 %%    {ok, <<RawBin:TotalBytes/binary>>} = file:pread(Fd, Pos, TotalBytes),
     %% This isn't probably the most erlang way to write this; rethink...
     case file:pread(Fd, Pos, TotalBytes) of
-	{ok, <<RawBin:TotalBytes/binary>>} -> 
-	      if Pos >= TAB ->
-		      {remove_block_prefixes(BlockOffset, RawBin), Pos + TotalBytes};
-		 true ->
-		      % 09 UPGRADE CODE
-		      <<ReturnBin:Len/binary, _/binary>> = RawBin,
-		      {[ReturnBin], Pos + Len}
-	      end;
-	{ok, BinaryData} ->   
-	    ?LOG_ERROR("Bad Size in read of file ~p @ ~p, expected ~p got ~p bytes", [Path, Pos, TotalBytes, size(BinaryData)]),
-	    couch_stats_collector:increment({couchdb, crash_count_trapped}),
-	    throw({badmatch, erlang:get_stacktrace()});
-	X ->
-	    ?LOG_ERROR("Reading file ~p@~p, got ~p", [Path, Pos, X]),
-	    couch_stats_collector:increment({couchdb, crash_count_trapped}),
-	    throw({X, erlang:get_stacktrace()})
+        {ok, <<RawBin:TotalBytes/binary>>} ->
+              if Pos >= TAB ->
+                      {remove_block_prefixes(BlockOffset, RawBin), Pos + TotalBytes};
+                 true ->
+                      % 09 UPGRADE CODE
+                      <<ReturnBin:Len/binary, _/binary>> = RawBin,
+                      {[ReturnBin], Pos + Len}
+              end;
+        {ok, BinaryData} ->
+            ?LOG_ERROR("Bad Size in read of file ~p @ ~p, expected ~p got ~p bytes", [Path, Pos, TotalBytes, size(BinaryData)]),
+            couch_stats_collector:increment({couchdb, crash_count_trapped}),
+            throw({badmatch, erlang:get_stacktrace()});
+        X ->
+            ?LOG_ERROR("Reading file ~p@~p, got ~p", [Path, Pos, X]),
+            couch_stats_collector:increment({couchdb, crash_count_trapped}),
+            throw({X, erlang:get_stacktrace()})
     end.
 
 -spec extract_md5(iolist()) -> {binary(), iolist()}.
@@ -329,7 +224,7 @@ split_iolist([Byte | Rest], SplitAt, BeginAcc) when is_integer(Byte) ->
 
 %%
 %% Factored out gen_server funs...
-%% 
+%%
 pread_iolist_ns(File, Pos) ->
     {LenIolist, NextPos} = read_raw_iolist_int(File, Pos, 4),
     case iolist_to_binary(LenIolist) of
@@ -359,3 +254,6 @@ sync_ns(#file{fd=Fd}) ->
 
 find_header_ns(#file{fd=Fd, eof=Pos}) ->
     find_header(Fd, Pos div ?SIZE_BLOCK).
+
+close_ns(#file{fd=Fd}) ->
+    close(Fd).
