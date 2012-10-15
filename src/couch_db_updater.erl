@@ -386,11 +386,6 @@ init_db(DbName, Filepath, Fd, Header0) ->
 %                    "[before_header, after_header, on_file_open]")),
 %                           "before_header").
 
-    case lists:member(on_file_open, FsyncOptions) of
-    true -> ok = couch_file:sync(Fd);
-    _ -> ok
-    end,
-
     {ok, IdBtree} = couch_btree:open(Header#db_header.fulldocinfo_by_id_btree_state, Fd,
         [{split, fun(X) -> btree_by_id_split(X) end},
         {join, fun(X,Y) -> btree_by_id_join(X,Y) end},
@@ -411,11 +406,10 @@ init_db(DbName, Filepath, Fd, Header0) ->
     {MegaSecs, Secs, MicroSecs} = now(),
     StartTime = ?l2b(io_lib:format("~p",
             [(MegaSecs*1000000*1000000) + (Secs*1000000) + MicroSecs])),
-    {ok, RefCntr} = couch_ref_counter:start([Fd]),
+%%    {ok, RefCntr} = couch_ref_counter:start([Fd]),
     #db{
         update_pid=self(),
         fd=Fd,
-        fd_ref_counter = RefCntr,
         header=Header,
         fulldocinfo_by_id_btree = IdBtree,
         docinfo_by_seq_btree = SeqBtree,
@@ -433,8 +427,9 @@ init_db(DbName, Filepath, Fd, Header0) ->
         }.
 
 
-close_db(#db{fd_ref_counter = RefCntr}) ->
-    couch_ref_counter:drop(RefCntr).
+close_db(_) ->
+%    couch_ref_counter:drop(RefCntr).
+    ok.
 
 
 refresh_validate_doc_funs(Db) ->
@@ -706,9 +701,9 @@ commit_data(Db, true) ->
 commit_data(Db, _) ->
     #db{
         fd = Fd,
-        filepath = Filepath,
+        filepath = _Filepath,
         header = OldHeader,
-        fsync_options = FsyncOptions,
+        fsync_options = _FsyncOptions,
         waiting_delayed_commit = Timer
     } = Db,
     if is_reference(Timer) -> erlang:cancel_timer(Timer); true -> ok end,
@@ -716,17 +711,7 @@ commit_data(Db, _) ->
     OldHeader ->
         Db#db{waiting_delayed_commit=nil};
     Header ->
-        case lists:member(before_header, FsyncOptions) of
-        true -> ok = couch_file:sync(Filepath);
-        _    -> ok
-        end,
-
         ok = couch_file:write_header(Fd, Header),
-
-        case lists:member(after_header, FsyncOptions) of
-        true -> ok = couch_file:sync(Filepath);
-        _    -> ok
-        end,
 
         Db#db{waiting_delayed_commit=nil,
             header=Header,
