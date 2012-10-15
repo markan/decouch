@@ -6,31 +6,55 @@
 
 -export([open/0]).
 -export([open/1]).
+-export([adh/0]).
 -export([all_docs/1]).
 -export([all_docs_view/3]).
+
+-export([process_docs/3, process_one/3]).
 
 open() ->
     open("authorization.couch").
 
+adh() ->
+    {Db, _} = open(),
+    all_docs(Db).
+
 open(FilePath) ->
     DbName = "foo",
-    {ok, Fd} = couch_db:open_db_file(FilePath, []),
+    {ok, Fd} = couch_file:open(FilePath, []),
     {ok, Header} = couch_file:read_header(Fd),
-    ?debugVal(Header),
     Db = couch_db_updater:init_db(DbName, FilePath, Fd, Header),
-    ?debugVal(Db),
     {Db, Header}.
+
+process_docs(Kv, _Reds, AccIn) ->
+    ?debugVal(Kv),
+    ?debugVal(Kv#full_doc_info.id),
+    RevTree = Kv#full_doc_info.rev_tree,
+    ?debugVal(hd(RevTree)),
+    ?debugVal(couch_key_tree:get_all_leafs(RevTree)),
+%%    ?debugVal(Reds),
+    ?debugVal(AccIn),
+    {ok, AccIn}.
+
+process_one(Kv, _Reds, AccIn) ->
+    ?debugVal(Kv),
+    ?debugVal(Kv#full_doc_info.id),
+    RevTree = Kv#full_doc_info.rev_tree,
+    ?debugVal(RevTree),
+    {I, {B, X1, X2}} = hd(RevTree),
+    ?debugFmt("~s", [B]),
+    ?debugVal(I), ?debugVal(B), ?debugVal(X1), ?debugVal(X2),
+    ?debugVal(couch_key_tree:get_all_leafs_full(RevTree)),
+%%    ?debugVal(Reds),
+    ?debugVal(AccIn),
+    {stop, AccIn}.
 
 all_docs(Db) ->
     Limit = 10,
     SkipCount = 0,
     Options = [end_key_gt], 
     FoldAccInit = {Limit, SkipCount, undefined, []},
-    InFun = fun(Kv, _Reds, AccIn) ->
-                    ?debugVal(Kv),
-                    ?debugVal(AccIn),
-                    AccIn
-            end,
+    InFun = fun process_one/3,
     couch_btree:fold(Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options).
 
 
