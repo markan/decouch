@@ -10,7 +10,7 @@
 -export([all_docs/1]).
 -export([all_docs_view/3]).
 
--export([process_docs/3, process_one/3]).
+-export([process_docs/4, process_one/4]).
 
 open() ->
     open("authorization.couch").
@@ -26,7 +26,7 @@ open(FilePath) ->
     Db = couch_db_updater:init_db(DbName, FilePath, Fd, Header),
     {Db, Header}.
 
-process_docs(Kv, _Reds, AccIn) ->
+process_docs(_Db, Kv, _Reds, AccIn) ->
     ?debugVal(Kv),
     ?debugVal(Kv#full_doc_info.id),
     RevTree = Kv#full_doc_info.rev_tree,
@@ -36,15 +36,18 @@ process_docs(Kv, _Reds, AccIn) ->
     ?debugVal(AccIn),
     {ok, AccIn}.
 
-process_one(Kv, _Reds, AccIn) ->
+process_one(Db, Kv, _Reds, AccIn) ->
     ?debugVal(Kv),
     ?debugVal(Kv#full_doc_info.id),
     RevTree = Kv#full_doc_info.rev_tree,
     ?debugVal(RevTree),
     {I, {B, X1, X2}} = hd(RevTree),
     ?debugFmt("~s", [B]),
+    ?debugVal(catch binary_to_term(B)),
     ?debugVal(I), ?debugVal(B), ?debugVal(X1), ?debugVal(X2),
     ?debugVal(couch_key_tree:get_all_leafs_full(RevTree)),
+    ?debugVal(catch couch_db:open_doc_int(Db, Kv, [])),
+
 %%    ?debugVal(Reds),
     ?debugVal(AccIn),
     {stop, AccIn}.
@@ -54,7 +57,7 @@ all_docs(Db) ->
     SkipCount = 0,
     Options = [end_key_gt], 
     FoldAccInit = {Limit, SkipCount, undefined, []},
-    InFun = fun process_one/3,
+    InFun = fun(KV, Reds, Acc) -> process_one(Db, KV, Reds, Acc) end,
     couch_btree:fold(Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options).
 
 
