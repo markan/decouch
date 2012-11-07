@@ -10,7 +10,7 @@
 -export([all_docs/1]).
 -export([all_docs_view/3]).
 
--export([process_docs/4, process_one/4]).
+-export([process_docs/4, process_one/4, process_all_docs/5]).
 
 open() ->
     open("authorization.couch").
@@ -46,18 +46,28 @@ process_one(Db, Kv, _Reds, AccIn) ->
     ?debugVal(catch binary_to_term(B)),
     ?debugVal(I), ?debugVal(B), ?debugVal(X1), ?debugVal(X2),
     ?debugVal(couch_key_tree:get_all_leafs_full(RevTree)),
-    ?debugVal(catch couch_db:open_doc_int(Db, Kv, [])),
-
-%%    ?debugVal(Reds),
+    {ok, #doc{body = Body}} = couch_db:open_doc_int(Db, Kv, []),
+    ?debugVal(Body),
     ?debugVal(AccIn),
     {stop, AccIn}.
 
+process_all_docs(F, Db, Kv, _Reds, AccIn) ->
+    Key = Kv#full_doc_info.id,
+    {ok, #doc{body = Body}} = couch_db:open_doc_int(Db, Kv, []),
+    AccOut = F(Key, Body, AccIn),
+    {ok, AccOut}.
+
 all_docs(Db) ->
+    ets:new(couch_data, [set,public,named_table]),
     Limit = 10,
     SkipCount = 0,
     Options = [end_key_gt], 
     FoldAccInit = {Limit, SkipCount, undefined, []},
-    InFun = fun(KV, Reds, Acc) -> process_one(Db, KV, Reds, Acc) end,
+    Fun = fun(Key, Body, AccIn) ->
+                  ets:insert_new(couch_data, {Key, Body}),
+                  AccIn
+          end,
+    InFun = fun(KV, Reds, Acc) -> process_all_docs(Fun, Db, KV, Reds, Acc) end,
     couch_btree:fold(Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options).
 
 
