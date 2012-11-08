@@ -7,17 +7,18 @@
 -export([open/0]).
 -export([open/1]).
 -export([adh/0]).
--export([all_docs/1]).
+-export([all_docs/2]).
 -export([all_docs_view/3]).
 
 -export([process_docs/4, process_one/4, process_all_docs/5]).
 
 open() ->
-    open("authorization.couch").
+    open("chef_3f0cbfe0b0c0474d9ac86a8fd51d6a30.couch").
 
 adh() ->
     {Db, _} = open(),
-    all_docs(Db).
+    all_docs(Db, couch_data),
+    close(Db).
 
 open(FilePath) ->
     DbName = "foo",
@@ -25,6 +26,10 @@ open(FilePath) ->
     {ok, Header} = couch_file:read_header(Fd),
     Db = couch_db_updater:init_db(DbName, FilePath, Fd, Header),
     {Db, Header}.
+
+close(Db) ->
+                                                %    couch_file:close(Db).
+    ok.
 
 process_docs(_Db, Kv, _Reds, AccIn) ->
     ?debugVal(Kv),
@@ -57,18 +62,21 @@ process_all_docs(F, Db, Kv, _Reds, AccIn) ->
     AccOut = F(Key, Body, AccIn),
     {ok, AccOut}.
 
-all_docs(Db) ->
-    ets:new(couch_data, [set,public,named_table]),
+all_docs(Db, TableName) ->
+    ets:new(TableName, [set,public,named_table]),
     Limit = 10,
     SkipCount = 0,
     Options = [end_key_gt], 
     FoldAccInit = {Limit, SkipCount, undefined, []},
     Fun = fun(Key, Body, AccIn) ->
-                  ets:insert_new(couch_data, {Key, Body}),
+                  ets:insert_new(TableName, {Key, Body}),
                   AccIn
           end,
     InFun = fun(KV, Reds, Acc) -> process_all_docs(Fun, Db, KV, Reds, Acc) end,
-    couch_btree:fold(Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options).
+    Time = timer:tc(
+             couch_btree, fold, [Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options] ),
+    ?debugVal(Time),
+    ?debugVal(ets:info(TableName)).
 
 
 all_docs_view(Req, Db, Keys) ->
