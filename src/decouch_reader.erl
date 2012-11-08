@@ -89,5 +89,5 @@ all_docs_iter(Name, Db, IterFun) ->
     InFun = fun(KV, Reds, Acc) -> process_all_docs(IterFun, Db, KV, Reds, Acc) end,
     {Time, _} = timer:tc(
                   couch_btree, fold, [Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options] ),
-    io:format("Processing database '~s' took ~f seconds~n", [Name, Time/1000000]),
+    io:format("Database '~s' processed in ~f seconds~n", [Name, Time/1000000]),
     ok.

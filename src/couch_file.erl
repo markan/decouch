@@ -236,7 +236,6 @@ pread_ns(#file{fd=Fd,tail_append_begin=TailAppendBegin} = _File, Pos, Bytes) ->
 
 open_ns(FilePath, _Options) ->
     {ok, FileInfo} = file:read_file_info(FilePath),
-    ?debugVal(FileInfo#file_info.size),
     Size = FileInfo#file_info.size,
     %% We know we are going to read the whole file, so we should bite
     %% the bullet and read ahead the whole thing. Couchdb's access
@@ -244,7 +243,8 @@ open_ns(FilePath, _Options) ->
     %% readahead
     {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, Size}]),
     %% Hopefully trigger readahead starting from the beginning of the file
-    ?debugVal(timer:tc(couch_file, read_all, [Fd])),
+    {Time, _} = timer:tc(couch_file, read_all, [Fd]),
+    io:format("Database '~s' of size ~w bytes prefetched in ~f seconds~n", [FilePath, Size, Time/1000000]),
     {ok, Length} = file:position(Fd, eof),
     {ok, #file{fd=Fd, eof=Length, path=FilePath}}.
 
