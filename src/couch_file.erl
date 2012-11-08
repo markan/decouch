@@ -12,7 +12,11 @@
 
 -module(couch_file).
 
+-include_lib("kernel/include/file.hrl").
+
 -include("couch_db.hrl").
+
+-include_lib("eunit/include/eunit.hrl").
 
 -define(SIZE_BLOCK, 4096).
 
@@ -28,6 +32,8 @@
 -export([pread_binary/2, read_header/1]).
 -export([close_ns/1]).
 -export([open_ns/2, pread_iolist_ns/2, pread_ns/3, bytes_ns/1, sync_ns/1, find_header_ns/1]).
+
+-export([read_all/1]).
 
 %%----------------------------------------------------------------------
 %% Args:   Valid Options are [create] and [create,overwrite].
@@ -242,9 +248,29 @@ pread_ns(#file{fd=Fd,tail_append_begin=TailAppendBegin} = _File, Pos, Bytes) ->
     {ok, Bin, Pos >= TailAppendBegin}.
 
 open_ns(FilePath, _Options) ->
-    {ok, Fd} = file:open(FilePath, [read, append, raw, binary]),
+    {ok, FileInfo} = file:read_file_info(FilePath),
+    ?debugVal(FileInfo#file_info.size),
+    Size = FileInfo#file_info.size,
+    %% We know we are going to read the whole file, so we should bite
+    %% the bullet and read ahead the whole thing. Couchdb's access
+    %% pattern is from end towards beginning so it actively subverts
+    %% readaheadty
+    {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, Size}]),
+    %% Hopefully trigger readahead starting from the beginning of the file
+    ?debugVal(timer:tc(couch_file, read_all, [Fd])),
     {ok, Length} = file:position(Fd, eof),
     {ok, #file{fd=Fd, eof=Length, path=FilePath}}.
+
+%%%
+%%% This a hack to read the whole file in before we actually try to read as a couch file
+%%% 
+read_all(Fd) ->
+    case file:read(Fd, 1048576) of %% 2^20 bytes == 1048576
+        {ok, _Data} ->
+            read_all(Fd);
+        eof->
+            ok
+    end.
 
 bytes_ns(#file{eof=Length}) ->
     Length.
