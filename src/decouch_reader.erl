@@ -8,13 +8,21 @@
 -export([adh/0, adh/1]).
 -export([all_docs/2]).
 
--export([process_docs/4, process_one/4, process_all_docs/5]).
+-export([process_one/4, process_all_docs/5]).
 
--export([open_process_all/2]).
+-export([open_process_all/2, process_to_ets/2]).
+
+process_to_ets(DbName, TableName) ->
+    ets:new(TableName, [set,public,named_table]),
+    IterFn = fun(Key, Body, AccIn) ->
+                     ets:insert_new(TableName, {Key, Body}),
+                     AccIn
+             end,
+    open_process_all(DbName, IterFn).
 
 open_process_all(DbName, IterFn) ->
     {Db, _} = open(DbName),
-    all_docs(Db, IterFn),
+    all_docs_iter(DbName, Db, IterFn),
     close(Db).
 
 adh() ->
@@ -34,17 +42,6 @@ open(FilePath) ->
 
 close(Db) ->
     couch_file:close(Db).
-
-
-process_docs(_Db, Kv, _Reds, AccIn) ->
-    ?debugVal(Kv),
-    ?debugVal(Kv#full_doc_info.id),
-    RevTree = Kv#full_doc_info.rev_tree,
-    ?debugVal(hd(RevTree)),
-    ?debugVal(couch_key_tree:get_all_leafs(RevTree)),
-%%    ?debugVal(Reds),
-    ?debugVal(AccIn),
-    {ok, AccIn}.
 
 process_one(Db, Kv, _Reds, AccIn) ->
     ?debugVal(Kv),
@@ -71,7 +68,7 @@ all_docs(Db, TableName) ->
     ets:new(TableName, [set,public,named_table]),
     Limit = 10,
     SkipCount = 0,
-    Options = [end_key_gt], 
+    Options = [end_key_gt],
     FoldAccInit = {Limit, SkipCount, undefined, []},
     Fun = fun(Key, Body, AccIn) ->
                   ets:insert_new(TableName, {Key, Body}),
@@ -84,3 +81,13 @@ all_docs(Db, TableName) ->
     ?debugVal(ets:info(TableName)).
 
 
+all_docs_iter(Name, Db, IterFun) ->
+    Limit = 10,
+    SkipCount = 0,
+    Options = [end_key_gt],
+    FoldAccInit = {Limit, SkipCount, undefined, []},
+    InFun = fun(KV, Reds, Acc) -> process_all_docs(IterFun, Db, KV, Reds, Acc) end,
+    {Time, _} = timer:tc(
+                  couch_btree, fold, [Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options] ),
+    io:format("Processing database '~s' took ~f seconds~n", [Name, Time/1000000]),
+    ok.
