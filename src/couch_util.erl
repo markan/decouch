@@ -21,7 +21,6 @@
 -export([file_read_size/1, get_nested_json_value/2, json_user_ctx/1]).
 -export([proplist_apply_field/2, json_apply_field/2]).
 -export([to_binary/1, to_integer/1, to_list/1, url_encode/1]).
--export([json_encode/1, json_decode/1]).
 -export([verify/2,simple_call/2,shutdown_sync/1]).
 -export([compressible_att_type/1]).
 -export([get_value/2, get_value/3]).
@@ -375,22 +374,6 @@ url_encode([H|T]) ->
     end;
 url_encode([]) ->
     [].
-
-json_encode(V) ->
-    Handler =
-    fun({L}) when is_list(L) ->
-        {struct,L};
-    (Bad) ->
-        exit({json_encode, {bad_term, Bad}})
-    end,
-    (mochijson2:encoder([{handler, Handler}]))(V).
-
-json_decode(V) ->
-    try (mochijson2:decoder([{object_hook, fun({struct,L}) -> {L} end}]))(V)
-    catch
-        _Type:_Error ->
-            throw({invalid_json,V})
-    end.
 
 verify([X|RestX], [Y|RestY], Result) ->
     verify(RestX, RestY, (X bxor Y) bor Result);
