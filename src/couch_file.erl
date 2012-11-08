@@ -243,7 +243,7 @@ open_ns(FilePath, _Options) ->
     %% We know we are going to read the whole file, so we should bite
     %% the bullet and read ahead the whole thing. Couchdb's access
     %% pattern is from end towards beginning so it actively subverts
-    %% readaheadty
+    %% readahead
     {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, Size}]),
     %% Hopefully trigger readahead starting from the beginning of the file
     ?debugVal(timer:tc(couch_file, read_all, [Fd])),
