@@ -57,7 +57,6 @@ open_doc(Db, IdOrDocInfo) ->
     open_doc(Db, IdOrDocInfo, []).
 
 open_doc(Db, Id, Options) ->
-    increment_stat(Db, {couchdb, database_reads}),
     case open_doc_int(Db, Id, Options) of
     {ok, #doc{deleted=true}=Doc} ->
         case lists:member(deleted, Options) of
@@ -100,7 +99,6 @@ find_ancestor_rev_pos({RevPos, [RevId|Rest]}, AttsSinceRevs) ->
     end.
 
 open_doc_revs(Db, Id, Revs, Options) ->
-    increment_stat(Db, {couchdb, database_reads}),
     [{ok, Results}] = open_doc_revs_int(Db, [{Id, Revs}], Options),
     {ok, [apply_open_options(Result, Options) || Result <- Results]}.
 
@@ -472,8 +470,3 @@ make_doc(#db{fd=Fd}=Db, Id, Deleted, Bp, RevisionPath) ->
         deleted = Deleted
         }.
 
-
-increment_stat(#db{is_sys_db = true}, _Stat) ->
-    ok;
-increment_stat(#db{}, Stat) ->
-    couch_stats_collector:increment(Stat).
