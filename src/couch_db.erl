@@ -13,7 +13,7 @@
 -module(couch_db).
 
 -export([get_db_info/1,get_design_docs/1]).
--export([monitor/1,count_changes_since/2]).
+-export([count_changes_since/2]).
 -export([get_doc_info/2,open_doc/2,open_doc/3,open_doc_revs/4]).
 -export([get_revs_limit/1]).
 -export([get_missing_revs/2,name/1,doc_to_tree/1,get_update_seq/1,get_committed_update_seq/1]).
@@ -49,9 +49,6 @@ open_db_file(Filepath, Options) ->
     Error ->
         Error
     end.
-
-monitor(#db{main_pid=MainPid}) ->
-    erlang:monitor(process, MainPid).
 
 open_doc(Db, IdOrDocInfo) ->
     open_doc(Db, IdOrDocInfo, []).
