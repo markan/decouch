@@ -4,19 +4,24 @@
 
 -include("couch_db.hrl").
 
--export([open/0]).
 -export([open/1]).
--export([adh/0]).
+-export([adh/0, adh/1]).
 -export([all_docs/2]).
--export([all_docs_view/3]).
 
 -export([process_docs/4, process_one/4, process_all_docs/5]).
 
-open() ->
-    open("chef_3f0cbfe0b0c0474d9ac86a8fd51d6a30.couch").
+-export([open_process_all/2]).
+
+open_process_all(DbName, IterFn) ->
+    {Db, _} = open(DbName),
+    all_docs(Db, IterFn),
+    close(Db).
 
 adh() ->
-    {Db, _} = open(),
+    adh("chef_3f0cbfe0b0c0474d9ac86a8fd51d6a30.couch").
+
+adh(File) ->
+    {Db, _} = open(File),
     all_docs(Db, couch_data),
     close(Db).
 
@@ -79,45 +84,3 @@ all_docs(Db, TableName) ->
     ?debugVal(ets:info(TableName)).
 
 
-all_docs_view(Req, Db, Keys) ->
-    #view_query_args{
-               start_key = StartKey,
-               start_docid = StartDocId,
-               end_key = EndKey,
-               end_docid = EndDocId,
-               limit = Limit,
-               skip = SkipCount,
-               direction = Dir,
-               inclusive_end = Inclusive
-              } = QueryArgs = couch_httpd_view:parse_view_params(Req, Keys, map),
-    {ok, Info} = couch_db:get_db_info(Db),
-    CurrentEtag = undef_etag,
-    TotalRowCount = couch_util:get_value(doc_count, Info),
-                                     StartId = if is_binary(StartKey) -> StartKey;
-                                                  true -> StartDocId
-                                               end,
-    EndId = if is_binary(EndKey) -> EndKey;
-               true -> EndDocId
-            end,
-    FoldAccInit = {Limit, SkipCount, undefined, []},
-    UpdateSeq = couch_db:get_update_seq(Db),
-%%% Keys == nil
-    FoldlFun = couch_httpd_view:make_view_fold_fun(Req, QueryArgs, CurrentEtag, Db, UpdateSeq,
-                                                   TotalRowCount, #view_fold_helper_funs{
-                                                     reduce_count = fun couch_db:enum_docs_reduce_to_count/1
-                                                    }),
-    AdapterFun = fun(#full_doc_info{id=Id}=FullDocInfo, Offset, Acc) ->
-                         case couch_doc:to_doc_info(FullDocInfo) of
-                             #doc_info{revs=[#rev_info{deleted=false, rev=Rev}|_]} ->
-                                 FoldlFun({{Id, Id}, {[{rev, couch_doc:rev_to_str(Rev)}]}}, Offset, Acc);
-                             #doc_info{revs=[#rev_info{deleted=true}|_]} ->
-                                 {ok, Acc}
-                         end
-                 end,
-    {ok, LastOffset, FoldResult} =
-        couch_db:enum_docs(Db,
-                           AdapterFun,
-                           FoldAccInit,
-                           [{start_key, StartId}, {dir, Dir},
-                            {if Inclusive -> end_key; true -> end_key_gt end, EndId}]),
-    {LastOffset, FoldResult}.
