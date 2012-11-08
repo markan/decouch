@@ -42,10 +42,17 @@ open(FilePath) ->
 close(Db) ->
     couch_file:close(Db).
 
-process_all_docs(F, Db, Kv, _Reds, AccIn) ->
+process_each_doc(F, Db, Kv, _Reds, AccIn) ->
     Key = Kv#full_doc_info.id,
-    {ok, #doc{body = Body}} = couch_db:open_doc_int(Db, Kv, []),
-    AccOut = F(Key, Body, AccIn),
+    AccOut = case couch_db:open_doc_int(Db, Kv, []) of
+                 {ok, #doc{deleted=true}} ->
+                     AccIn;
+                 {ok, #doc{body = Body, deleted=false}} ->
+                     F(Key, Body, AccIn);
+                 {ok, Doc2} ->
+                     ?debugVal(Doc2),
+                     AccIn
+    end,
     {ok, AccOut}.
 
 all_docs_iter(Name, Db, IterFun) ->
@@ -53,7 +60,7 @@ all_docs_iter(Name, Db, IterFun) ->
     SkipCount = 0,
     Options = [end_key_gt],
     FoldAccInit = {Limit, SkipCount, undefined, []},
-    InFun = fun(KV, Reds, Acc) -> process_all_docs(IterFun, Db, KV, Reds, Acc) end,
+    InFun = fun(KV, Reds, Acc) -> process_each_doc(IterFun, Db, KV, Reds, Acc) end,
     {Time, _} = timer:tc(
                   couch_btree, fold, [Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options] ),
     io:format("Database '~s' processed in ~f seconds~n", [Name, Time/1000000]),
