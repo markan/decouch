@@ -104,19 +104,8 @@ bytes(Fd) ->
 %% Purpose: Close the file.
 %% Returns: ok
 %%----------------------------------------------------------------------
-close(Fd) ->
-    MRef = erlang:monitor(process, Fd),
-    try
-        catch unlink(Fd),
-        catch exit(Fd, shutdown),
-        receive
-        {'DOWN', MRef, _, _, _} ->
-            ok
-        end
-    after
-        erlang:demonitor(MRef, [flush])
-    end.
-
+close(#db{fd=File}) ->
+    close_ns(File).
 
 read_header(Fd) ->
     {ok, Term} = find_header_ns(Fd),
@@ -282,4 +271,4 @@ find_header_ns(#file{fd=Fd, eof=Pos}) ->
     find_header(Fd, Pos div ?SIZE_BLOCK).
 
 close_ns(#file{fd=Fd}) ->
-    close(Fd).
+    file:close(Fd).

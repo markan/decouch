@@ -27,9 +27,9 @@ open(FilePath) ->
     Db = couch_db_updater:init_db(DbName, FilePath, Fd, Header),
     {Db, Header}.
 
-close(_Db) ->
-                                                %    couch_file:close(Db).
-    ok.
+close(Db) ->
+    couch_file:close(Db).
+
 
 process_docs(_Db, Kv, _Reds, AccIn) ->
     ?debugVal(Kv),
