@@ -26,18 +26,13 @@
 %% API
 -export([process_couch_file/1]).
 
+-include("decouch.hrl").
+
 -include_lib("eunit/include/eunit.hrl").
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
--record(org_info,
-        { org_name,
-          org_id,
-          db_name,
-          chef_ets,
-          auth_ets}).
 
 process_couch_file(OrgId) ->
 
@@ -56,7 +51,12 @@ process_couch_file(OrgId) ->
                      AccIn
              end,
     decouch_reader:open_process_all(DbName, IterFn),
-    Org.
+    %% TODO: fix this to get orgname properly (from guid or something)
+    case ets:lookup(Org#org_info.chef_ets, orgname) of 
+        [] -> Org;
+        [{orgname, OrgName}] ->
+            Org#org_info{org_name = OrgName}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,30 +91,49 @@ process_item_by_type({_, node}, _Org, _Key, _Body) ->
 %% Process Chef:: types
 process_item_by_type({chef, ChefType}, Org, Key, Body) ->
     ets:insert(Org#org_info.chef_ets, {Key, ChefType, Body});
-%% Process Mixlib Authorization types
-process_item_by_type({auth, AuthType}, Org, Key, Body) ->
-    ets:insert(Org#org_info.chef_ets, {Key, AuthType, Body});
+%% Process simple mixlib authorization types
+%% These just have the fields
+%% id, couchrest-type, name (or some variant), sometimes orgname, requester_id
+process_item_by_type({auth_simple, AuthType}, Org, Key, Body) ->
+    Name = get_name(AuthType, Body),
+    ets:insert(Org#org_info.auth_ets, {{AuthType, Name}, {Key, Body}});
+%% More complex mixlib authorization types contain other data, or don't fit the schema
+%% So we need to put them into the chef db for further processing...
+%%
+%% Client: All the info is in the mixlib record; there is no Chef::Client object
+process_item_by_type({auth, client=AuthType}, Org, Key, Body) ->
+    Name = get_name(AuthType, Body),
+    ets:insert(Org#org_info.chef_ets, {{AuthType, Name}, {Key, Body}});
+%% Group: actor_and_group_names, groupname, orgname
+process_item_by_type({auth, group=AuthType}, Org, Key, Body) ->
+    Name = get_name(AuthType, Body),
+    %% NOTE: This is a dirty hack for the orgname and we should be ashamed of ourselves.
+    %% TODO: RIP THIS OUT when we get things running
+    OrgName = ej:get({<<"orgname">>}, Body),
+    ets:insert(Org#org_info.chef_ets, {orgname, OrgName}),
+    ets:insert(Org#org_info.chef_ets, {{AuthType, Name}, {Key, Body}});
 
 %% Process various unmatched types
 process_item_by_type(undefined, _Org, <<"_design/", DesignDoc/binary>>, _Body) ->
     io:format("Design doc ~s~n", [DesignDoc]);
-process_item_by_type(undefined, _Org, Key, Body) ->
+process_item_by_type(undefined, _Org, _Key, _Body) ->
     ?debugVal(undefined),
-    ?debugVal(Key),
-    ?debugVal(Body);
+    ?debugVal(_Key),
+    ?debugVal(_Body),
+    ok;
 process_item_by_type(Type, Org, Key, Body) ->
     ?debugVal(Type),
     ets:insert(Org#org_info.chef_ets, {Key, Body}).
 
 normalize_type_name(<<"Mixlib::Authorization::Models::Client">>) -> {auth, client};
-normalize_type_name(<<"Mixlib::Authorization::Models::Container">>) -> {auth, container};
-normalize_type_name(<<"Mixlib::Authorization::Models::Cookbook">>) -> {auth, cookbook};
-normalize_type_name(<<"Mixlib::Authorization::Models::DataBag">>) -> {auth, databag};
-normalize_type_name(<<"Mixlib::Authorization::Models::Environment">>) -> {auth, environment};
+normalize_type_name(<<"Mixlib::Authorization::Models::Container">>) -> {auth_simple, container};
+normalize_type_name(<<"Mixlib::Authorization::Models::Cookbook">>) -> {auth_simple, cookbook};
+normalize_type_name(<<"Mixlib::Authorization::Models::DataBag">>) -> {auth_simple, databag};
+normalize_type_name(<<"Mixlib::Authorization::Models::Environment">>) -> {auth_simple, environment};
 normalize_type_name(<<"Mixlib::Authorization::Models::Group">>) -> {auth, group};
-normalize_type_name(<<"Mixlib::Authorization::Models::Node">>) -> {auth, node};
-normalize_type_name(<<"Mixlib::Authorization::Models::Role">>) -> {auth, role};
-normalize_type_name(<<"Mixlib::Authorization::Models::Sandbox">>) -> {auth, sandbox};
+normalize_type_name(<<"Mixlib::Authorization::Models::Node">>) -> {auth_simple, node};
+normalize_type_name(<<"Mixlib::Authorization::Models::Role">>) -> {auth_simple, role};
+normalize_type_name(<<"Mixlib::Authorization::Models::Sandbox">>) -> {auth_simple, sandbox};
 normalize_type_name(<<"Chef::Checksum">>) -> {chef, checksum};
 normalize_type_name(<<"Chef::CookbookVersion">>) -> {chef, cookbook_version};
 normalize_type_name(<<"Chef::DataBag">>) -> {chef, databag};
@@ -126,5 +145,16 @@ normalize_type_name(<<"Chef::Sandbox">>) -> {chef, sandbox};
 normalize_type_name(undefined) -> undefined.
 
 
+get_name(Type, Body) ->
+    ej:get({mixlib_name_key(Type)}, Body).
+
+mixlib_name_key(client) -> <<"clientname">>;
+mixlib_name_key(container) -> <<"containername">>;
+mixlib_name_key(cookbook) -> <<"display_name">>;
+mixlib_name_key(group) -> <<"groupname">>;
+mixlib_name_key(sandbox) -> <<"sandbox_id">>;
+mixlib_name_key(_) -> <<"name">>.
+
+    
 
 
