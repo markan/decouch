@@ -24,7 +24,7 @@
 -module(decouch_processor).
 
 %% API
--export([process_couch_file/1]).
+-export([process_couch_file/1, cleanup_org_info/1]).
 
 -include("decouch.hrl").
 
@@ -35,7 +35,6 @@
 %%%===================================================================
 
 process_couch_file(OrgId) ->
-
     CData = ets:new(chef_data, [set,public]),
     AData = ets:new(auth_data, [set,public]),
 
@@ -45,7 +44,8 @@ process_couch_file(OrgId) ->
                      org_id = OrgId,
                      db_name = DbName,
                      chef_ets = CData,
-                     auth_ets = AData},
+                     auth_ets = AData,
+                     start_time = os:timestamp()},
     IterFn = fun(Key, Body, AccIn) ->
                      process_item(Org, Key, Body),
                      AccIn
@@ -57,6 +57,13 @@ process_couch_file(OrgId) ->
         [{orgname, OrgName}] ->
             Org#org_info{org_name = OrgName}
     end.
+
+cleanup_org_info(#org_info{org_name = Name, org_id = Guid, chef_ets = Chef, auth_ets = Auth, start_time = Start}) ->
+    ets:delete(Chef),
+    ets:delete(Auth),
+    Time = timer:now_diff(os:timestamp(), Start),
+    io:format("Database ~s (org ~s) completed in ~f seconds", [Name, Guid, Time/10000000]).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -154,7 +161,5 @@ mixlib_name_key(cookbook) -> <<"display_name">>;
 mixlib_name_key(group) -> <<"groupname">>;
 mixlib_name_key(sandbox) -> <<"sandbox_id">>;
 mixlib_name_key(_) -> <<"name">>.
-
-    
 
 

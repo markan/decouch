@@ -31,4 +31,5 @@
           org_id,
           db_name,
           chef_ets,
-          auth_ets}).
+          auth_ets,
+          start_time}).
