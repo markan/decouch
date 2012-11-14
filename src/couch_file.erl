@@ -255,6 +255,9 @@ read_all(Fd) ->
     case file:read(Fd, 1048576) of %% 2^20 bytes == 1048576
         {ok, _Data} ->
             read_all(Fd);
+        {error, enomem} ->
+            erlang:garbage_collect(),
+            ok;
         eof->
             ok
     end.
