@@ -237,11 +237,13 @@ pread_ns(#file{fd=Fd,tail_append_begin=TailAppendBegin} = _File, Pos, Bytes) ->
 open_ns(FilePath, _Options) ->
     {ok, FileInfo} = file:read_file_info(FilePath),
     Size = FileInfo#file_info.size,
+    MaxReadAhead = envy:get(decouch, max_read_ahead, 1024*1024*1024, integer),
+    ReadAhead = min(Size, MaxReadAhead),
     %% We know we are going to read the whole file, so we should bite
     %% the bullet and read ahead the whole thing. Couchdb's access
     %% pattern is from end towards beginning so it actively subverts
     %% readahead
-    {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, Size}]),
+    {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, ReadAhead}]),
     %% Hopefully trigger readahead starting from the beginning of the file
     {Time, _} = timer:tc(couch_file, read_all, [Fd]),
     io:format("Database '~s' of size ~w bytes prefetched in ~f seconds~n", [FilePath, Size, Time/1000000]),
