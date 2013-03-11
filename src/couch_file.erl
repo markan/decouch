@@ -246,7 +246,7 @@ open_ns(FilePath, _Options) ->
     {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, ReadAhead}]),
     %% Hopefully trigger readahead starting from the beginning of the file
     {Time, _} = timer:tc(couch_file, read_all, [Fd]),
-    io:format(standard_error, "Database '~s' of size ~w bytes prefetched in ~f seconds~n", [FilePath, Size, Time/1000000]),
+    ?LOG_DEBUG("Database '~s' of size ~w bytes prefetched in ~f seconds~n", [FilePath, Size, Time/1000000]),
     {ok, Length} = file:position(Fd, eof),
     {ok, #file{fd=Fd, eof=Length, path=FilePath}}.
 

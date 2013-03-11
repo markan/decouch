@@ -61,7 +61,7 @@ process_each_doc(F, Db, Kv, _Reds, AccIn) ->
                  {ok, #doc{body = Body, deleted=false}} ->
                      F(Key, Body, AccIn);
                  {ok, Doc2} ->
-                     ?debugVal(Doc2),
+                     ?LOG_DEBUG("process_each_doc: ~p", [Doc2]),
                      AccIn
     end,
     {ok, AccOut}.
@@ -74,5 +74,5 @@ all_docs_iter(Name, Db, IterFun) ->
     InFun = fun(KV, Reds, Acc) -> process_each_doc(IterFun, Db, KV, Reds, Acc) end,
     {Time, _} = timer:tc(
                   couch_btree, fold, [Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options] ),
-    io:format(standard_error, "Database '~s' processed in ~f seconds~n", [Name, Time/1000000]),
+    ?LOG_DEBUG("Database '~s' processed in ~f seconds~n", [Name, Time/1000000]),
     ok.
