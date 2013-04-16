@@ -59,10 +59,7 @@ process_each_doc(F, Db, Kv, _Reds, AccIn) ->
                  {ok, #doc{deleted=true}} ->
                      AccIn;
                  {ok, #doc{body = Body, deleted=false}} ->
-                     F(Key, Body, AccIn);
-                 {ok, Doc2} ->
-                     ?LOG_DEBUG("process_each_doc: ~p", [Doc2]),
-                     AccIn
+                     F(Key, Body, AccIn)
     end,
     {ok, AccOut}.
 
