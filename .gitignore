@@ -5,3 +5,4 @@ ebin
 *.o
 *.beam
 *.plt
+.concrete
