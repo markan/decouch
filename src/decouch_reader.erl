@@ -58,7 +58,7 @@ open_process_all(DbName, IterFn) ->
     open_process_all(DbName, IterFn, []).
 
 open(FilePath) ->
-    DbName = "foo",
+    DbName = filename:basename(FilePath),
     {ok, Fd} = couch_file:open(FilePath, []),
     {ok, Header} = couch_file:read_header(Fd),
     Db = couch_db_updater:init_db(DbName, FilePath, Fd, Header),
@@ -81,6 +81,7 @@ process_each_doc(F, Db, Kv, _Reds, AccIn) ->
     {ok, AccOut}.
 
 all_docs_iter(Name, Db, IterFun, IterFunAcc) ->
+    %% what's the limit 10 do?
     Limit = 10,
     SkipCount = 0,
     Options = [end_key_gt],
