@@ -13,11 +13,14 @@
 
 open_process_all_test() ->
     Data = ets:new(decouch_test, [set]),
-    IterFun = fun(Key, RevId, Body, AccIn) ->
+    IterFun = fun(Key, RevId, Body, N) ->
                       ets:insert(Data, {Key, RevId, Body}),
-                      AccIn
+                      N + 1
               end,
-    decouch_reader:open_process_all(?DB_FILE, IterFun),
+    Result = decouch_reader:open_process_all(?DB_FILE, IterFun, 0),
+
+    ?assertEqual(1000, Result),
+
     %% test_db.couch contains 1000 simple docs
     ?assertEqual(1000, proplists:get_value(size, ets:info(Data))),
 
