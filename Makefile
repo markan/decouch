@@ -18,6 +18,9 @@
 # by concrete, add them here (along with make rules to build them if needed)
 # ALL_HOOK = ...
 
+# add prestep to test target.
+test: test/test_db.couch
+
 concrete_rules_file = $(wildcard concrete.mk)
 ifeq ($(concrete_rules_file),concrete.mk)
     include concrete.mk
@@ -26,3 +29,6 @@ else
 	@echo "ERROR: missing concrete.mk"
 	@echo "  run: concrete update"
 endif
+
+test/test_db.couch:
+	@cat test/test_db.couch.gz |gunzip > test/test_db.couch
