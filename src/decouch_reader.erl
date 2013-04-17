@@ -98,5 +98,6 @@ all_docs_iter(Name, Db, IterFun, IterFunAcc) ->
 get_rev_id(#doc{revs = {Count, [Rev|_]}}) ->
     iolist_to_binary([integer_to_list(Count), <<"-">>, hexiolist(Rev)]).
 
+%% we could also use couch_util:to_hex/1. In some informal testing, this is ~60% faster.
 hexiolist(<<X:128/big-unsigned-integer>>) ->
     io_lib:format("~32.16.0b", [X]).
