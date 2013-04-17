@@ -333,6 +333,9 @@ open_doc_revs_int(Db, IdRevs, Options) ->
         IdRevs, LookupResults).
 
 open_doc_int(Db, <<?LOCAL_DOC_PREFIX, _/binary>> = Id, _Options) ->
+    %% local docs are docs tagged not to be replicated. They have a
+    %% magic prefix that prevents them from being forwarded over
+    %% replication.
     case couch_btree:lookup(Db#db.local_docs_btree, [Id]) of
     [{ok, {_, {Rev, BodyData}}}] ->
         {ok, #doc{id=Id, revs={0, [list_to_binary(integer_to_list(Rev))]}, body=BodyData}};
