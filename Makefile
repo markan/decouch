@@ -18,6 +18,10 @@
 # by concrete, add them here (along with make rules to build them if needed)
 # ALL_HOOK = ...
 
+# since we want to add the prestep to test, we have to also duplicate
+# the `all` target since first target to appear is the default.
+all:
+
 # add prestep to test target.
 test: test/test_db.couch
 
