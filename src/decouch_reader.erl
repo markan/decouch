@@ -38,6 +38,9 @@ process_to_ets(DbName, TableName) ->
              end,
     open_process_all(DbName, IterFn).
 
+%% @doc Given the path to a couchdb data file `DbName', open the database and call `IterFun'
+%% on each non-deleted document. The fun `IterFun' should take four arguments: `Key',
+%% `RevId', `Body', `Acc'.
 open_process_all(DbName, IterFn) ->
     {Db, _} = open(DbName),
     all_docs_iter(DbName, Db, IterFn),
@@ -58,11 +61,9 @@ process_each_doc(F, Db, Kv, _Reds, AccIn) ->
     AccOut = case couch_db:open_doc_int(Db, Kv, []) of
                  {ok, #doc{deleted=true}} ->
                      AccIn;
-                 {ok, #doc{body = Body, deleted=false}} ->
-                     F(Key, Body, AccIn);
-                 {ok, Doc2} ->
-                     ?LOG_DEBUG("process_each_doc: ~p", [Doc2]),
-                     AccIn
+                 {ok, #doc{body = Body, deleted=false} = Doc} ->
+                     RevId = get_rev_id(Doc),
+                     F(Key, RevId, Body, AccIn)
     end,
     {ok, AccOut}.
 
@@ -76,3 +77,9 @@ all_docs_iter(Name, Db, IterFun) ->
                   couch_btree, fold, [Db#db.fulldocinfo_by_id_btree, InFun, FoldAccInit, Options] ),
     ?LOG_DEBUG("Database '~s' processed in ~f seconds~n", [Name, Time/1000000]),
     ok.
+
+get_rev_id(#doc{revs = {Count, [Rev|_]}}) ->
+    iolist_to_binary([integer_to_list(Count), <<"-">>, hexiolist(Rev)]).
+
+hexiolist(<<X:128/big-unsigned-integer>>) ->
+    io_lib:format("~32.16.0b", [X]).

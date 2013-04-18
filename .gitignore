@@ -5,3 +5,7 @@ ebin
 *.o
 *.beam
 *.plt
+.concrete
+/test/test_db.couch
+/log
+
