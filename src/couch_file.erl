@@ -243,7 +243,7 @@ open_ns(FilePath, _Options) ->
     %% the bullet and read ahead the whole thing. Couchdb's access
     %% pattern is from end towards beginning so it actively subverts
     %% readahead
-    {ok, Fd} = file:open(FilePath, [read, append, raw, binary, {read_ahead, ReadAhead}]),
+    {ok, Fd} = file:open(FilePath, [read, raw, binary, {read_ahead, ReadAhead}]),
     %% Hopefully trigger readahead starting from the beginning of the file
     {Time, _} = timer:tc(couch_file, read_all, [Fd]),
     ?LOG_DEBUG("Database '~s' of size ~w bytes prefetched in ~f seconds~n", [FilePath, Size, Time/1000000]),
